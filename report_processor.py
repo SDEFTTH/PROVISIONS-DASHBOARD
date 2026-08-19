@@ -4,7 +4,7 @@ from io import BytesIO
 import base64
 import html
 import pandas as pd
-import openpyxl
+import xlsxwriter
 
 # Pandas is used for all source reading, transformation, aggregation and report data.
 # XlsxWriter is used only by pandas ExcelWriter to create the final XLSX file.
@@ -179,123 +179,328 @@ def _bbc_report(df, report_date, olt_map, bbc_info, bbc_order):
         })
     return pd.DataFrame(rows)
 
-def _style_table(ws, df, workbook, startrow=0, header_format=None):
-    # Convenience formatter for pandas/xlsxwriter output.
-    if df.empty: return
-    cols=list(df.columns)
-    for j,col in enumerate(cols):
-        width=min(max(12, max([len(str(col))]+[len(str(x)) for x in df[col].head(300).fillna("")])+2), 38)
-        ws.set_column(j,j,width)
+def _style_table(ws, df, workbook, startrow=0, header_format=None, widths=None):
+    """Apply the same visual language used by the HTML dashboard table."""
+    if df.empty:
+        return
+    cols = list(df.columns)
+    for j, col in enumerate(cols):
+        if widths and col in widths:
+            width = widths[col]
+        else:
+            sample = df[col].head(300).fillna("").astype(str)
+            width = min(max(10, max([len(str(col))] + [len(x) for x in sample]) + 2), 34)
+        ws.set_column(j, j, width)
     if header_format:
-        for j,col in enumerate(cols): ws.write(startrow,j,col,header_format)
+        for j, col in enumerate(cols):
+            ws.write(startrow, j, col, header_format)
 
 
-def _write_xlsx(df, bbc_report, output_xlsx, report_date, stats, franchise_report, manager_report, olt_master, bbc_master):
-    out=Path(output_xlsx); out.parent.mkdir(parents=True,exist_ok=True)
-    with pd.ExcelWriter(out, engine="xlsxwriter", datetime_format="dd-mmm-yyyy", date_format="dd-mmm-yyyy") as writer:
-        wb=writer.book
-        navy=wb.add_format({"bold":True,"font_color":"white","bg_color":"#17365D","align":"center","valign":"vcenter"})
-        blue=wb.add_format({"bold":True,"font_color":"white","bg_color":"#1F4EBA","align":"center","valign":"vcenter"})
-        title=wb.add_format({"bold":True,"font_size":22,"font_color":"white","bg_color":"#17365D","align":"center","valign":"vcenter"})
-        sub=wb.add_format({"italic":True,"font_color":"#666666","align":"center"})
-        pct=wb.add_format({"num_format":"0.0%"})
-        num=wb.add_format({"num_format":"#,##0"})
-        green=wb.add_format({"bg_color":"#E2F0D9","font_color":"#006100","bold":True})
-        red=wb.add_format({"bg_color":"#FCE4D6","font_color":"#9C0006","bold":True})
-        wrap=wb.add_format({"text_wrap":True,"valign":"top"})
+def _write_xlsx(df, bbc_report, output_xlsx, report_date, stats,
+                franchise_report, manager_report, olt_master, bbc_master):
+    """Create Excel output with HTML-matching styling and all columns retained."""
+    out = Path(output_xlsx)
+    out.parent.mkdir(parents=True, exist_ok=True)
 
-        # Raw prepared data
-        data_out=df.copy()
-        data_out["DATE"]=pd.to_datetime(data_out["DATE"],errors="coerce")
-        data_out.to_excel(writer,sheet_name="Data",index=False,startrow=0)
-        ws=writer.sheets["Data"]; ws.freeze_panes(1,0)
-        ws.set_tab_color("#4472C4")
-        for j,c in enumerate(data_out.columns): ws.write(0,j,c,navy)
-        ws.set_column(0,len(data_out.columns)-1,14)
-        for c in ["BBC Name","Maintenance Franchisee","Connection Type"]:
-            if c in data_out.columns: ws.set_column(data_out.columns.get_loc(c),data_out.columns.get_loc(c),28)
+    with pd.ExcelWriter(
+        out, engine="xlsxwriter",
+        datetime_format="dd-mmm-yyyy", date_format="dd-mmm-yyyy"
+    ) as writer:
+        wb = writer.book
 
-        # Executive dashboard - no drawing charts in this sheet; charts get dedicated sheets.
-        bbc_report.to_excel(writer,sheet_name="FTTHDashboard",index=False,startrow=7)
-        ws=writer.sheets["FTTHDashboard"]; ws.hide_gridlines(2); ws.freeze_panes(8,0)
-        ws.merge_range("A1:P2","FTTH WARANGAL OA DASHBOARD",title)
-        ws.merge_range("A3:P3",f"Daily provisions dashboard | As on {report_date:%d-%m-%Y}",sub)
-        for j,c in enumerate(bbc_report.columns): ws.write(7,j,c,blue)
-        ws.set_row(0,24); ws.set_row(1,24); ws.set_row(7,32)
-        ws.set_column("A:A",7); ws.set_column("B:B",20); ws.set_column("C:C",34); ws.set_column("D:D",15); ws.set_column("E:E",18)
-        ws.set_column("F:I",14); ws.set_column("J:J",14); ws.set_column("K:N",12)
-        ws.set_column("J:J",14,pct)
-        # Total OA row above the table, preserving app.py's expected row 8 structure.
-        total={"S.No":"Total OA","AGM/ Manager(MT)":"WGL","BBM NAME":"","AREA":"","Exclusive/Non Exclusive":"",
-               "No. Of OLTEs Mapped":int(bbc_report["No. Of OLTEs Mapped"].sum()),"Monthly Target":int(bbc_report["Monthly Target"].sum()),
-               f"Daily Provision{report_date:%d-%m-%Y}":int(bbc_report[f"Daily Provision{report_date:%d-%m-%Y}"].sum()),
-               "Cumulative Achievement":int(bbc_report["Cumulative Achievement"].sum()),"% of Achievement":(bbc_report["Cumulative Achievement"].sum()/bbc_report["Monthly Target"].sum() if bbc_report["Monthly Target"].sum() else 0),
-               "CLSVO":int(bbc_report["CLSVO"].sum()),"CLSNP":int(bbc_report["CLSNP"].sum()),"Disconnections":int(bbc_report["Disconnections"].sum()),
-               "NET":int(bbc_report["NET"].sum()),"NPC":int(bbc_report["NPC"].sum()),"RECONNECTIONS":int(bbc_report["RECONNECTIONS"].sum())}
-        for j,c in enumerate(bbc_report.columns): ws.write(8,j,total.get(c,""),navy if j in range(14) else None)
-        # Note: table begins at row 8 zero-based (Excel row 9), total at Excel row 9 would shift app parsing.
-        # Rewrite total to Excel row 8 (zero-based 7) and headers to Excel row 7 (zero-based 6) is handled below.
-        # We intentionally maintain the existing app contract: Excel row 8 = total, row 9+ = details.
-        ws.set_row(7,20)
-        # Move actual dataframe headers to row 7 and details to row 8? Pandas wrote headers at row 8.
-        # Rewrite a clean report manually from row 6 so app.py sees total at zero-based index 8.
-        # Clear the old area by overwriting the intended rows.
-        for j,c in enumerate(bbc_report.columns): ws.write(6,j,c,blue)
-        for j,c in enumerate(bbc_report.columns): ws.write(7,j,total.get(c,""),navy)
-        for i,(_,r) in enumerate(bbc_report.iterrows(),start=8):
-            for j,c in enumerate(bbc_report.columns):
-                val=r[c]
-                if pd.isna(val): val=""
-                fmt=pct if c=="% of Achievement" else None
-                ws.write(i,j,val,fmt)
-        ws.set_row(7,24); ws.autofilter(6,0,7+len(bbc_report),len(bbc_report.columns)-1)
+        # HTML palette from the supplied dashboard:
+        # body #F2F4F8, header #373C6F, blue #1F4EBA,
+        # negative #FDE8E8/#C80000, positive #E8F8E8/#0A8A0A.
+        body_bg, table_header, blue = "#F2F4F8", "#373C6F", "#1F4EBA"
+        white, text, muted, border = "#FFFFFF", "#222222", "#666666", "#DDDDDD"
+        stripe, neg_bg, neg_fg = "#F7F9FC", "#FDE8E8", "#C80000"
+        pos_bg, pos_fg = "#E8F8E8", "#0A8A0A"
 
-        manager_report.to_excel(writer,sheet_name="Manager_Report",index=False)
-        franchise_report.to_excel(writer,sheet_name="Franchisee_Report",index=False)
-        for sname,dd in [("Manager_Report",manager_report),("Franchisee_Report",franchise_report)]:
-            ws=writer.sheets[sname]; ws.freeze_panes(1,0)
-            for j,c in enumerate(dd.columns): ws.write(0,j,c,blue)
-            ws.set_column(0,len(dd.columns)-1,16)
-            if "Name" in dd.columns: ws.set_column(dd.columns.get_loc("Name"),dd.columns.get_loc("Name"),30)
+        title = wb.add_format({
+            "bold": True, "font_size": 22, "font_color": white,
+            "bg_color": table_header, "align": "center", "valign": "vcenter"
+        })
+        sub = wb.add_format({
+            "italic": True, "font_color": muted, "bg_color": body_bg,
+            "align": "center", "valign": "vcenter"
+        })
+        header = wb.add_format({
+            "bold": True, "font_color": white, "bg_color": table_header,
+            "border": 1, "border_color": border,
+            "align": "center", "valign": "vcenter", "text_wrap": True
+        })
+        total_fmt = wb.add_format({
+            "bold": True, "font_color": white, "bg_color": table_header,
+            "border": 1, "border_color": border,
+            "align": "center", "valign": "vcenter"
+        })
+        cell = wb.add_format({
+            "font_color": text, "bg_color": white, "border": 1,
+            "border_color": border, "align": "center", "valign": "vcenter"
+        })
+        cell_alt = wb.add_format({
+            "font_color": text, "bg_color": stripe, "border": 1,
+            "border_color": border, "align": "center", "valign": "vcenter"
+        })
+        pct = wb.add_format({
+            "num_format": "0.0%", "border": 1, "border_color": border,
+            "align": "center", "valign": "vcenter"
+        })
+        pct_alt = wb.add_format({
+            "num_format": "0.0%", "bg_color": stripe, "border": 1,
+            "border_color": border, "align": "center", "valign": "vcenter"
+        })
+        neg = wb.add_format({
+            "font_color": neg_fg, "bg_color": neg_bg, "bold": True,
+            "border": 1, "border_color": border, "align": "center", "valign": "vcenter"
+        })
+        pos = wb.add_format({
+            "font_color": pos_fg, "bg_color": pos_bg, "bold": True,
+            "border": 1, "border_color": border, "align": "center", "valign": "vcenter"
+        })
+        wrap = wb.add_format({"text_wrap": True, "valign": "top",
+                              "font_color": text, "bg_color": white})
+        card_value = wb.add_format({
+            "bold": True, "font_size": 20, "font_color": blue,
+            "bg_color": white, "border": 1, "border_color": "#E0E0E0",
+            "align": "center", "valign": "vcenter"
+        })
+        card_label = wb.add_format({
+            "font_size": 9, "font_color": muted, "bg_color": white,
+            "border": 1, "border_color": "#E0E0E0",
+            "align": "center", "valign": "vcenter"
+        })
+        card_neg = wb.add_format({
+            "bold": True, "font_size": 20, "font_color": neg_fg,
+            "bg_color": neg_bg, "border": 1, "border_color": "#E0E0E0",
+            "align": "center", "valign": "vcenter"
+        })
 
-        # Native Excel tables provide robust dropdown filters without VBA.
-        for sname,dd,table_name in [("Data",data_out,"tbl_FTTH_Data"),("Manager_Report",manager_report,"tbl_Manager_Report"),("Franchisee_Report",franchise_report,"tbl_Franchisee_Report")]:
-            if len(dd): writer.sheets[sname].add_table(0,0,len(dd),len(dd.columns)-1,{"name":table_name,"style":"Table Style Medium 2","columns":[{"header":c} for c in dd.columns]})
+        # -------------------- DATA --------------------
+        data_out = df.copy()
+        if "DATE" in data_out.columns:
+            data_out["DATE"] = pd.to_datetime(data_out["DATE"], errors="coerce")
+        data_out.to_excel(writer, sheet_name="Data", index=False)
+        ws = writer.sheets["Data"]
+        ws.hide_gridlines(2)
+        ws.freeze_panes(1, 0)
+        ws.set_tab_color(blue)
+        _style_table(ws, data_out, wb, 0, header,
+                     {"BBC Name": 30, "Maintenance Franchisee": 28, "Connection Type": 22})
+        if len(data_out):
+            ws.add_table(0, 0, len(data_out), len(data_out.columns)-1,
+                         {"name": "tbl_FTTH_Data", "style": "Table Style Medium 2",
+                          "columns": [{"header": c} for c in data_out.columns]})
 
-        # Master sheets: write the exact repository master files used by this run.
-        olt_master.to_excel(writer,sheet_name="OLT_BBC_Map",index=False)
-        bbc_master.to_excel(writer,sheet_name="BBC_Master",index=False)
-        for sname,dd in [("OLT_BBC_Map",olt_master),("BBC_Master",bbc_master)]:
-            ws=writer.sheets[sname]; ws.freeze_panes(1,0)
-            for j,c in enumerate(dd.columns): ws.write(0,j,c,blue)
-            ws.set_column(0,len(dd.columns)-1,24)
+        # -------------------- MAIN HTML-STYLE TABLE --------------------
+        bbc_report = bbc_report.copy()
+        cols = list(bbc_report.columns)
+        bbc_report.to_excel(writer, sheet_name="FTTHDashboard", index=False, startrow=6)
 
-        # Dedicated chart sheets prevent overlap entirely.
-        charts={}
-        # BBC performance
-        cr=wb.add_worksheet("Charts_BBC"); cr.hide_gridlines(2); cr.set_column("A:A",2); cr.set_column("B:Q",13)
-        cr.merge_range("B2:Q3","BBC / EMPLOYEE PERFORMANCE",title)
-        chart=wb.add_chart({"type":"bar"}); n=len(bbc_report)
-        chart.add_series({"name":"Cumulative","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,8,7+n,8],"data_labels":{"value":True}})
-        chart.set_title({"name":"Cumulative Achievement by BBC / Employee"}); chart.set_x_axis({"name":"Connections"}); chart.set_y_axis({"name":"BBC / Employee"}); chart.set_legend({"none":True}); chart.set_size({"width":1050,"height":620}); cr.insert_chart("B5",chart)
-        chart2=wb.add_chart({"type":"bar"}); chart2.add_series({"name":"NET","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,13,7+n,13],"data_labels":{"value":True}}); chart2.set_title({"name":"NET by BBC / Employee"}); chart2.set_x_axis({"name":"NET Connections"}); chart2.set_y_axis({"name":"BBC / Employee"}); chart2.set_legend({"none":True}); chart2.set_size({"width":1050,"height":620}); cr.insert_chart("B38",chart2)
+        ws = writer.sheets["FTTHDashboard"]
+        ws.hide_gridlines(2)
+        ws.freeze_panes(7, 0)
+        ws.set_tab_color(blue)
+        last_letter = xlsxwriter.utility.xl_col_to_name(max(0, len(cols)-1))
 
-        cr2=wb.add_worksheet("Charts_Operations"); cr2.hide_gridlines(2); cr2.set_column("A:A",2); cr2.set_column("B:Q",13); cr2.merge_range("B2:Q3","OPERATIONS & TARGET ANALYSIS",title)
-        ch=wb.add_chart({"type":"column"}); ch.add_series({"name":"Target","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,6,7+n,6]}); ch.add_series({"name":"Achieved","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,8,7+n,8]}); ch.set_title({"name":"Monthly Target vs Cumulative Achievement"}); ch.set_y_axis({"name":"Connections"}); ch.set_size({"width":1050,"height":600}); cr2.insert_chart("B5",ch)
-        ch2=wb.add_chart({"type":"column","subtype":"stacked"}); ch2.add_series({"name":"CLSVO","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,10,7+n,10]}); ch2.add_series({"name":"CLSNP","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,11,7+n,11]}); ch2.set_title({"name":"Disconnections by BBC / Employee"}); ch2.set_y_axis({"name":"Connections"}); ch2.set_size({"width":1050,"height":600}); cr2.insert_chart("B36",ch2)
+        ws.merge_range(f"A1:{last_letter}2", "FTTH WARANGAL OA DASHBOARD", title)
+        ws.merge_range(f"A3:{last_letter}3",
+                       f"Daily provisions dashboard | As on {report_date:%d-%m-%Y}", sub)
+        ws.set_row(0, 28)
+        ws.set_row(1, 28)
+        ws.set_row(6, 34)
 
-        # Dashboard is a clean executive landing page with KPI cards and hyperlinks, no overlapping chart objects.
-        dash=wb.add_worksheet("Dashboard"); dash.hide_gridlines(2); dash.set_column("A:A",3); dash.set_column("B:Y",12)
-        dash.merge_range("B2:Y4","FTTH WARANGAL OA – EXECUTIVE DASHBOARD",title)
-        kpis=[("MONTHLY TARGET",stats["target"]),("CUMULATIVE",stats["cum"]),("NPC",stats["npc"]),("RECONNECTIONS",stats["reconnections"]),("DISCONNECTIONS",stats["disc"]),("ACHIEVEMENT",f'{stats["pct"]:.1f}%'),("NET",stats["net"])]
-        for i,(lab,val) in enumerate(kpis):
-            c=2+i*3; dash.merge_range(5,c,6,c+2,str(val),wb.add_format({"bold":True,"font_size":18,"align":"center","valign":"vcenter","bg_color":"#F2F4F8"})); dash.merge_range(7,c,7,c+2,lab,wb.add_format({"bold":True,"font_size":9,"align":"center","font_color":"#666666"}))
-        dash.write("B10","Use the dedicated chart sheets below. All BBC / employee rows are retained; no Top-N truncation is applied.",wrap)
-        dash.write_url("B12","internal:'Charts_BBC'!B5",string="Open BBC / Employee Charts")
-        dash.write_url("B14","internal:'Charts_Operations'!B5",string="Open Operations Charts")
-        dash.write_url("B16","internal:'Manager_Report'!A1",string="Open Manager / MT Report")
-        dash.write_url("B18","internal:'Franchisee_Report'!A1",string="Open Maintenance Franchisee Report")
+        widths = {}
+        for c in cols:
+            cu = str(c).upper()
+            if "MANAGER" in cu:
+                widths[c] = 22
+            elif c in ("BBM NAME", "BBM Name", "BBC Name", "Display Name"):
+                widths[c] = 34
+            elif c in ("AREA", "Area"):
+                widths[c] = 16
+            elif "%" in str(c):
+                widths[c] = 15
+            elif "DAILY" in cu:
+                widths[c] = 18
+            else:
+                widths[c] = min(max(12, len(str(c))+3), 20)
+        _style_table(ws, bbc_report, wb, 6, header, widths)
 
+        # Total OA row. No columns are removed, including NPC and RECONNECTIONS.
+        total = {}
+        for c in cols:
+            cu = str(c).upper()
+            if c == "S.No":
+                total[c] = "Total OA"
+            elif "MANAGER" in cu:
+                total[c] = "WGL"
+            elif any(k in cu for k in ("BBM NAME", "BBC NAME", "DISPLAY NAME", "AREA",
+                                       "EXCLUSIVE/NON EXCLUSIVE")):
+                total[c] = ""
+            elif c == "% of Achievement":
+                target = pd.to_numeric(bbc_report.get("Monthly Target", 0), errors="coerce").fillna(0).sum()
+                ach = pd.to_numeric(bbc_report.get("Cumulative Achievement", 0), errors="coerce").fillna(0).sum()
+                total[c] = ach / target if target else 0
+            else:
+                total[c] = pd.to_numeric(bbc_report[c], errors="coerce").fillna(0).sum()
+
+        for j, c in enumerate(cols):
+            val = total.get(c, "")
+            if c == "% of Achievement":
+                total_pct = wb.add_format({
+                    "bold": True, "font_color": white, "bg_color": table_header,
+                    "border": 1, "border_color": border, "num_format": "0.0%",
+                    "align": "center", "valign": "vcenter"
+                })
+                ws.write_number(7, j, float(val), total_pct)
+            else:
+                ws.write(7, j, "" if pd.isna(val) else val, total_fmt)
+
+        net_col = next((i for i,c in enumerate(cols) if str(c).upper()=="NET"), None)
+        pct_col = next((i for i,c in enumerate(cols) if str(c).upper()=="% OF ACHIEVEMENT"), None)
+
+        for i, (_, r) in enumerate(bbc_report.iterrows(), start=8):
+            alt = ((i-8) % 2 == 1)
+            for j, c in enumerate(cols):
+                val = "" if pd.isna(r[c]) else r[c]
+                if j == net_col and val != "":
+                    try:
+                        fval = float(val)
+                        ws.write(i, j, fval, neg if fval < 0 else pos)
+                    except (TypeError, ValueError):
+                        ws.write(i, j, val, cell_alt if alt else cell)
+                elif j == pct_col and val != "":
+                    ws.write(i, j, val, pct_alt if alt else pct)
+                else:
+                    ws.write(i, j, val, cell_alt if alt else cell)
+
+        ws.set_row(7, 24)
+        ws.autofilter(6, 0, 7+len(bbc_report), len(cols)-1)
+
+        if net_col is not None and len(bbc_report):
+            ws.conditional_format(8, net_col, 7+len(bbc_report), net_col,
+                                  {"type": "cell", "criteria": "<", "value": 0, "format": neg})
+            ws.conditional_format(8, net_col, 7+len(bbc_report), net_col,
+                                  {"type": "cell", "criteria": ">=", "value": 0, "format": pos})
+
+        # -------------------- OTHER REPORTS --------------------
+        for sname, dd in [("Manager_Report", manager_report),
+                          ("Franchisee_Report", franchise_report)]:
+            dd.to_excel(writer, sheet_name=sname, index=False)
+            ws = writer.sheets[sname]
+            ws.hide_gridlines(2)
+            ws.freeze_panes(1, 0)
+            ws.set_tab_color(blue)
+            _style_table(ws, dd, wb, 0, header,
+                         {"Name": 30, "Manager": 24, "Area": 18})
+            if len(dd):
+                ws.add_table(0, 0, len(dd), len(dd.columns)-1,
+                             {"name": "tbl_"+sname, "style": "Table Style Medium 2",
+                              "columns": [{"header": c} for c in dd.columns]})
+
+        # -------------------- MASTER FILES --------------------
+        for sname, dd in [("OLT_BBC_Map", olt_master), ("BBC_Master", bbc_master)]:
+            dd.to_excel(writer, sheet_name=sname, index=False)
+            ws = writer.sheets[sname]
+            ws.hide_gridlines(2)
+            ws.freeze_panes(1, 0)
+            ws.set_tab_color("#4472C4")
+            _style_table(ws, dd, wb, 0, header)
+            if len(dd):
+                ws.add_table(0, 0, len(dd), len(dd.columns)-1,
+                             {"name": "tbl_"+sname, "style": "Table Style Medium 2",
+                              "columns": [{"header": c} for c in dd.columns]})
+
+        # -------------------- CHART SHEETS --------------------
+        cr = wb.add_worksheet("Charts_BBC")
+        cr.hide_gridlines(2)
+        cr.set_column("A:A", 2)
+        cr.set_column("B:Q", 13)
+        cr.merge_range("B2:Q3", "BBC / EMPLOYEE PERFORMANCE", title)
+        n = len(bbc_report)
+        if n:
+            chart = wb.add_chart({"type":"bar"})
+            chart.add_series({"name":"Cumulative", "categories":["FTTHDashboard",8,2,7+n,2],
+                              "values":["FTTHDashboard",8,8,7+n,8], "data_labels":{"value":True}})
+            chart.set_title({"name":"Cumulative Achievement by BBC / Employee"})
+            chart.set_x_axis({"name":"Connections"})
+            chart.set_y_axis({"name":"BBC / Employee"})
+            chart.set_legend({"none":True})
+            chart.set_size({"width":1050,"height":620})
+            cr.insert_chart("B5", chart)
+
+            chart2 = wb.add_chart({"type":"bar"})
+            chart2.add_series({"name":"NET", "categories":["FTTHDashboard",8,2,7+n,2],
+                               "values":["FTTHDashboard",8,13,7+n,13],
+                               "data_labels":{"value":True}})
+            chart2.set_title({"name":"NET by BBC / Employee"})
+            chart2.set_x_axis({"name":"NET Connections"})
+            chart2.set_y_axis({"name":"BBC / Employee"})
+            chart2.set_legend({"none":True})
+            chart2.set_size({"width":1050,"height":620})
+            cr.insert_chart("B38", chart2)
+
+        cr2 = wb.add_worksheet("Charts_Operations")
+        cr2.hide_gridlines(2)
+        cr2.set_column("A:A", 2)
+        cr2.set_column("B:Q", 13)
+        cr2.merge_range("B2:Q3", "OPERATIONS & TARGET ANALYSIS", title)
+        if n:
+            ch = wb.add_chart({"type":"column"})
+            ch.add_series({"name":"Target", "categories":["FTTHDashboard",8,2,7+n,2],
+                           "values":["FTTHDashboard",8,6,7+n,6]})
+            ch.add_series({"name":"Achieved", "categories":["FTTHDashboard",8,2,7+n,2],
+                           "values":["FTTHDashboard",8,8,7+n,8]})
+            ch.set_title({"name":"Monthly Target vs Cumulative Achievement"})
+            ch.set_y_axis({"name":"Connections"})
+            ch.set_size({"width":1050,"height":600})
+            cr2.insert_chart("B5", ch)
+
+            ch2 = wb.add_chart({"type":"column","subtype":"stacked"})
+            ch2.add_series({"name":"CLSVO", "categories":["FTTHDashboard",8,2,7+n,2],
+                            "values":["FTTHDashboard",8,10,7+n,10]})
+            ch2.add_series({"name":"CLSNP", "categories":["FTTHDashboard",8,2,7+n,2],
+                            "values":["FTTHDashboard",8,11,7+n,11]})
+            ch2.set_title({"name":"Disconnections by BBC / Employee"})
+            ch2.set_y_axis({"name":"Connections"})
+            ch2.set_size({"width":1050,"height":600})
+            cr2.insert_chart("B36", ch2)
+
+        # -------------------- KPI DASHBOARD --------------------
+        dash = wb.add_worksheet("Dashboard")
+        dash.hide_gridlines(2)
+        dash.set_column("A:A", 3)
+        dash.set_column("B:Y", 12)
+        dash.merge_range("B2:Y4", "FTTH WARANGAL OA – EXECUTIVE DASHBOARD", title)
+
+        kpis = [
+            ("MONTHLY TARGET", stats["target"]),
+            ("CUMULATIVE", stats["cum"]),
+            ("NPC", stats["npc"]),
+            ("RECONNECTIONS", stats["reconnections"]),
+            ("DISCONNECTIONS", stats["disc"]),
+            ("ACHIEVEMENT", f'{stats["pct"]:.1f}%'),
+            ("NET", stats["net"])
+        ]
+        for i, (lab, val) in enumerate(kpis):
+            c = 2 + i*3
+            fmt = card_neg if lab == "NET" and float(stats["net"]) < 0 else card_value
+            dash.merge_range(5, c, 6, c+2, str(val), fmt)
+            dash.merge_range(7, c, 7, c+2, lab, card_label)
+
+        dash.write("B10",
+                   "All BBC / employee rows and ALL columns are retained. "
+                   "NET uses the same red/green highlighting as the HTML dashboard.",
+                   wrap)
+        dash.write_url("B12", "internal:'Charts_BBC'!B5",
+                       string="Open BBC / Employee Charts")
+        dash.write_url("B14", "internal:'Charts_Operations'!B5",
+                       string="Open Operations Charts")
+        dash.write_url("B16", "internal:'Manager_Report'!A1",
+                       string="Open Manager / MT Report")
+        dash.write_url("B18", "internal:'Franchisee_Report'!A1",
+                       string="Open Maintenance Franchisee Report")
 
 def run_report(input_file, output_xlsx, output_html):
     src=Path(input_file)
