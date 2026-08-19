@@ -568,10 +568,10 @@ def run_report(input_file, output_xlsx, output_html):
     # The HTML table is generated from the dataframe so no report data is lost.
     html_columns = [
         "S.No", "AGM/ Manager(MT)", "BBM NAME", "AREA",
-        "No. Of OLTEs Mapped", "Monthly Target",
-        f"Daily Provision{report_date:%d-%m-%Y}",
+        "OLTEs Mapped", "Monthly Target",
+        f"Daily Provision {report_date:%d-%m-%Y}",
         "Cumulative Achievement", "% of Achievement",
-        "NPC", "RECONNECTIONS", "CLSVO", "CLSNP",
+        "NPC", "RECONNX", "CLSVO", "CLSNP",
         "Disconnections", "NET"
     ]
     html_columns = [c for c in html_columns if c in rows.columns]
@@ -636,7 +636,8 @@ def run_report(input_file, output_xlsx, output_html):
         ("Cumulative Achievement", f'{stats["cum"]:,}'),
         ("% Achievement", f'{stats["pct"]:.2f}%'),
         ("Total Disconnections", f'{stats["disc"]:,}'),
-        ("NET", f'{stats["net"]:+,}')
+        ("NET", f'{stats["net"]:+,}'),
+        ("RECONNECTIONS", f'{stats["rec"]:,}')
     ]
     kpi_html = "".join(
         f'<div class="kpi {"neg" if lab == "NET" and stats["net"] < 0 else ""}">'
@@ -812,7 +813,7 @@ padding:16px;flex:1;min-width:420px;overflow:hidden;}}
     <h1>FTTH WARANGAL DASHBOARD</h1>
     <div class="sub">
       BBM Wise Provisioning Report of WGL OA as on {report_date:%d-%b-%Y}
-      &middot; Reported by VAMSHI KRISHNA ADEPU on {report_date:%d-%b-%Y}
+      &middot; Reported by VAMSHI KRISHNA ADEPU on {today_date:%d-%b-%Y}
     </div>
   </div>
 </div>
