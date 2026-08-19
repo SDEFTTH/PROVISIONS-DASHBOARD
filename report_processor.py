@@ -557,18 +557,233 @@ def run_report(input_file, output_xlsx, output_html):
 
     _write_xlsx(df, bbc, output_xlsx, report_date, stats, franchise_report, manager_report, olt_master, bbc_master)
 
-    rows=bbc.copy()
-    table=rows.to_html(index=False,border=0,classes="data-table",escape=True)
-    kpi_items=[
-        ("Monthly Target",f'{stats["target"]:,}'),("Cumulative",f'{stats["cum"]:,}'),
-        ("NPC",f'{stats["npc"]:,}'),("Reconnections",f'{stats["reconnections"]:,}'),
-        ("Disconnections",f'{stats["disc"]:,}'),("NET",f'{stats["net"]:+,}')
+    # -----------------------------------------------------------------------
+    # HTML DASHBOARD
+    # Based on the supplied reference text document.
+    # IMPORTANT: NPC and RECONNECTIONS remain in the Python report/table.
+    # -----------------------------------------------------------------------
+    rows = bbc.copy()
+
+    # Keep the existing Python columns, including NPC and RECONNECTIONS.
+    # The HTML table is generated from the dataframe so no report data is lost.
+    html_columns = [
+        "S.No", "AGM/ Manager(MT)", "BBM NAME", "AREA",
+        "No. Of OLTEs Mapped", "Monthly Target",
+        f"Daily Provision{report_date:%d-%m-%Y}",
+        "Cumulative Achievement", "% of Achievement",
+        "NPC", "RECONNECTIONS", "CLSVO", "CLSNP",
+        "Disconnections", "NET"
     ]
-    kpi_html="".join([f'<div class="kpi"><div class="v">{v}</div><div class="l">{lab}</div></div>' for lab,v in kpi_items])
-    html_doc=f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FTTH Warangal Dashboard</title>
-<style>body{{font-family:Segoe UI,Arial;background:#f3f6fa;margin:0;color:#1b1f24}}.hero{{background:#17365D;color:#fff;padding:28px 34px}}.hero h1{{margin:0}}.kpis{{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;padding:22px}}.kpi{{background:#fff;padding:18px;border-radius:10px;box-shadow:0 2px 8px #0001}}.v{{font-size:26px;font-weight:700;color:#1f4eba}}.l{{font-size:11px;color:#666}}.wrap{{padding:0 22px 30px;overflow:auto}}table{{border-collapse:collapse;width:100%;background:#fff}}th,td{{padding:8px;border:1px solid #ddd;text-align:center;white-space:nowrap}}th{{background:#1f4eba;color:#fff}}tr:nth-child(even){{background:#f7f9fc}}@media(max-width:900px){{.kpis{{grid-template-columns:repeat(2,1fr)}}}}</style></head>
-<body><div class="hero"><h1>FTTH WARANGAL OA DASHBOARD</h1><div>All BBC / employee records • generated {report_date:%d-%b-%Y}</div></div><div class="kpis">{kpi_html}</div><div class="wrap">{table}</div></body></html>"""
-    Path(output_html).write_text(html_doc,encoding="utf-8")
+    html_columns = [c for c in html_columns if c in rows.columns]
+    table_rows = rows[html_columns].copy()
+
+    # Build the table explicitly so NET can receive the reference red/green
+    # formatting while NPC and RECONNECTIONS remain visible columns.
+    def _fmt_html_value(value, col):
+        if pd.isna(value):
+            return ""
+        if col == "% of Achievement":
+            try:
+                return f"{float(value) * 100:.2f}%"
+            except (TypeError, ValueError):
+                return str(value)
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+
+    header_html = "".join(f"<th>{html.escape(str(c))}</th>" for c in html_columns)
+    body_html_parts = []
+
+    for _, r in table_rows.iterrows():
+        cells = []
+        for col in html_columns:
+            value = _fmt_html_value(r[col], col)
+            if col == "NET":
+                try:
+                    net_value = float(r[col])
+                    css = "neg" if net_value < 0 else "pos"
+                    cells.append(f"<td class='{css}'>{html.escape(value)}</td>")
+                except (TypeError, ValueError):
+                    cells.append(f"<td>{html.escape(value)}</td>")
+            else:
+                cells.append(f"<td>{html.escape(value)}</td>")
+        body_html_parts.append("<tr>" + "".join(cells) + "</tr>")
+
+    table_body = "\n".join(body_html_parts)
+
+    # Chart data: reference dashboard uses BBC-wise Target vs NET and
+    # BBC-wise % Achievement.
+    labels_js = ",".join(
+        "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
+        for v in rows["BBM NAME"].fillna("").astype(str)
+    )
+    target_js = ",".join(
+        str(int(v)) if pd.notna(v) else "0"
+        for v in pd.to_numeric(rows["Monthly Target"], errors="coerce").fillna(0)
+    )
+    net_js = ",".join(
+        str(int(v)) if pd.notna(v) else "0"
+        for v in pd.to_numeric(rows["NET"], errors="coerce").fillna(0)
+    )
+    pct_js = ",".join(
+        f"{float(v) * 100:.2f}" if pd.notna(v) else "0"
+        for v in pd.to_numeric(rows["% of Achievement"], errors="coerce").fillna(0)
+    )
+
+    kpi_items = [
+        ("Monthly Target", f'{stats["target"]:,}'),
+        (f'Provisions on {report_date:%d-%b-%Y}', f'{stats["today"]:,}'),
+        ("Cumulative Achievement", f'{stats["cum"]:,}'),
+        ("% Achievement", f'{stats["pct"]:.2f}%'),
+        ("Total Disconnections", f'{stats["disc"]:,}'),
+        ("NET", f'{stats["net"]:+,}')
+    ]
+    kpi_html = "".join(
+        f'<div class="kpi {"neg" if lab == "NET" and stats["net"] < 0 else ""}">'
+        f'<div class="v">{value}</div><div class="l">{html.escape(lab)}</div></div>'
+        for lab, value in kpi_items
+    )
+
+    html_doc = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WARANGAL OA FTTH Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+body{{font-family:Segoe UI,Arial,sans-serif;background:#f2f4f8;margin:0;color:#222;}}
+.banner{{background:linear-gradient(90deg,#373c6f,#1f4eba);color:#fff;padding:22px 30px;
+display:flex;align-items:center;gap:18px;}}
+.logo-img{{height:58px;width:auto;object-fit:contain;display:block;}}
+.banner h1{{margin:0;font-size:26px;letter-spacing:1px;}}
+.banner .sub{{opacity:.85;font-size:13px;margin-top:4px;}}
+.kpis{{display:flex;gap:16px;padding:20px 30px 0 30px;flex-wrap:wrap;}}
+.kpi{{background:#fff;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.08);
+padding:16px 22px;min-width:150px;}}
+.kpi .v{{font-size:26px;font-weight:700;color:#1f4eba;}}
+.kpi .l{{font-size:12px;color:#666;text-transform:uppercase;letter-spacing:.5px;}}
+.kpi.neg .v{{color:#c80000;}}
+.wrap{{padding:24px 30px;}}
+.table-wrap{{overflow-x:auto;border-radius:10px;}}
+table{{border-collapse:collapse;width:100%;min-width:1250px;background:#fff;
+box-shadow:0 2px 6px rgba(0,0,0,.06);}}
+th,td{{border:1px solid #ddd;padding:8px 10px;text-align:center;font-size:13px;}}
+th{{background:#373c6f;color:#fff;white-space:nowrap;}}
+tr:nth-child(even){{background:#f7f9fc;}}
+td.neg{{color:#c80000;font-weight:700;background:#fde8e8;}}
+td.pos{{color:#0a8a0a;font-weight:700;background:#e8f8e8;}}
+.note{{font-size:12px;color:#888;margin-top:10px;font-style:italic;}}
+button.dl{{margin-top:16px;background:#1f4eba;color:#fff;border:0;padding:10px 18px;
+border-radius:6px;cursor:pointer;font-size:14px;}}
+button.dl:hover{{background:#173a8f;}}
+.charts{{display:flex;gap:20px;flex-wrap:wrap;margin-top:24px;}}
+.chartbox{{background:#fff;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.08);
+padding:16px;flex:1;min-width:420px;}}
+.chartbox canvas{{max-height:320px;}}
+@media(max-width:900px){{
+.kpis{{display:grid;grid-template-columns:repeat(2,1fr);}}
+.kpi{{min-width:0;}}
+.chartbox{{min-width:0;}}
+.banner{{padding:18px;}}
+.wrap{{padding:18px;}}
+}}
+</style>
+</head>
+<body>
+<div class="banner">
+  <img class="logo-img" src="data:image/png;base64,{BSNL_LOGO_B64}" alt="BSNL Logo">
+  <div>
+    <h1>FTTH WARANGAL DASHBOARD</h1>
+    <div class="sub">
+      BBM Wise Provisioning Report of WGL OA as on {report_date:%d-%b-%Y}
+      &middot; Reported by VAMSHI KRISHNA ADEPU on {report_date:%d-%b-%Y}
+    </div>
+  </div>
+</div>
+
+<div class="kpis">{kpi_html}</div>
+
+<div class="wrap">
+  <div class="table-wrap">
+    <table id="dashboardTable">
+      <thead><tr>{header_html}</tr></thead>
+      <tbody>{table_body}</tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    NPC and RECONNECTIONS are retained as separate columns. Cumulative Achievement
+    equals NPC + RECONNECTIONS, while NET equals Cumulative Achievement minus
+    CLSVO and CLSNP.
+  </div>
+
+  <button class="dl" onclick="downloadCsv()">Download table as CSV</button>
+
+  <div class="charts">
+    <div class="chartbox"><canvas id="targetNetChart" height="260"></canvas></div>
+    <div class="chartbox"><canvas id="pctChart" height="260"></canvas></div>
+  </div>
+</div>
+
+<script>
+const labels=[{labels_js}];
+const targets=[{target_js}];
+const nets=[{net_js}];
+const pcts=[{pct_js}];
+
+new Chart(document.getElementById('targetNetChart'), {{
+  type:'bar',
+  data:{{
+    labels:labels,
+    datasets:[
+      {{label:'Monthly Target',data:targets,backgroundColor:'#1f4eba'}},
+      {{label:'NET',data:nets,backgroundColor:'#c80000'}}
+    ]
+  }},
+  options:{{
+    responsive:true,
+    plugins:{{title:{{display:true,text:'BBC Wise: Monthly Target vs NET'}}}},
+    scales:{{y:{{beginAtZero:true}}}}
+  }}
+}});
+
+new Chart(document.getElementById('pctChart'), {{
+  type:'line',
+  data:{{
+    labels:labels,
+    datasets:[{{
+      label:'% of Achievement',
+      data:pcts,
+      borderColor:'#c80000',
+      backgroundColor:'rgba(200,0,0,.15)',
+      fill:true,
+      tension:.3
+    }}]
+  }},
+  options:{{
+    responsive:true,
+    plugins:{{title:{{display:true,text:'BBC Wise: % of Achievement'}}}},
+    scales:{{y:{{beginAtZero:true,ticks:{{callback:(v)=>v+'%'}}}}}}
+  }}
+}});
+
+function downloadCsv(){{
+  const rows=[...document.querySelectorAll('#dashboardTable tr')].map(r=>
+    [...r.children].map(c=>'"'+c.innerText.replace(/"/g,'""')+'"').join(',')
+  );
+  const blob=new Blob([rows.join('\n')],{{type:'text/csv;charset=utf-8;'}});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='FTTH_Warangal_Dashboard.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}}
+</script>
+</body>
+</html>"""
+
+
     return Path(output_xlsx), Path(output_html), {
         "rows_processed":len(df),"unmapped_olt_ips":unmapped_olts,
         "unmapped_bbc_names":unmapped_names,
