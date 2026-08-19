@@ -637,7 +637,7 @@ def run_report(input_file, output_xlsx, output_html):
         ("% Achievement", f'{stats["pct"]:.2f}%'),
         ("Total Disconnections", f'{stats["disc"]:,}'),
         ("NET", f'{stats["net"]:+,}'),
-        ("RECONNECTIONS", f'{stats["rec"]:,}')
+        ("RECONNECTIONS", f'{stats["reconnections"]:,}')
     ]
     kpi_html = "".join(
         f'<div class="kpi {"neg" if lab == "NET" and stats["net"] < 0 else ""}">'
