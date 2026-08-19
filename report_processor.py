@@ -813,7 +813,7 @@ padding:16px;flex:1;min-width:420px;overflow:hidden;}}
     <h1>FTTH WARANGAL DASHBOARD</h1>
     <div class="sub">
       BBM Wise Provisioning Report of WGL OA as on {report_date:%d-%b-%Y}
-      &middot; Reported by VAMSHI KRISHNA ADEPU on {today_date:%d-%b-%Y}
+      &middot; Reported by VAMSHI KRISHNA ADEPU
     </div>
   </div>
 </div>
