@@ -569,9 +569,9 @@ def run_report(input_file, output_xlsx, output_html):
     html_columns = [
         "S.No", "AGM/ Manager(MT)", "BBM NAME", "AREA",
         "OLTEs Mapped", "Monthly Target",
-        f"Daily Provision {report_date:%d-%m-%Y}",
+        f"Daily Provision{report_date:%d-%m-%Y}",
         "Cumulative Achievement", "% of Achievement",
-        "NPC", "RECONNX", "CLSVO", "CLSNP",
+        "NPC", "RECONNECTIONS", "CLSVO", "CLSNP",
         "Disconnections", "NET"
     ]
     html_columns = [c for c in html_columns if c in rows.columns]
