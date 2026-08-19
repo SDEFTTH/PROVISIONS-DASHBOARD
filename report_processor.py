@@ -1,0 +1,371 @@
+import datetime as dt
+from pathlib import Path
+from io import BytesIO
+import base64
+import html
+import pandas as pd
+
+# Pandas is used for all source reading, transformation, aggregation and report data.
+# XlsxWriter is used only by pandas ExcelWriter to create the final XLSX file.
+
+BSNL_LOGO_B64 = """iVBORw0KGgoAAAANSUhEUgAAAUAAAACQCAMAAABOB0IDAAAC/VBMVEVHcEz7ax75ayH7ax77ax4HA437ax4HA40HA435ayH7ax77ax77ax4Eazj7ax77ax4HA40HA40HA437ax4HA43yaywHA43yayz7ax77ax77ax4HA40EazgEazgHA40HA43yayzyaywHA43yayzyaywHA40EazgHA43yayzyayz///8EazgHA43yayz///8EazgEazgEazgEazjyaywEazjyayzyayz////zbC7///////////8EazgEazgEazj///////////////////////8Eazj///+HbzcHA43yaywEazj////7ax7ybS/xbzLxcDPwdDrwdTvxbjHvekPugU7ybC3ugE3vfUjug1Hwdj3xcTXybC7xcTbuglDxcjbweEDvfknthlbwdz/thVXve0XweEHvfEfsjGDweULxczjuf0vth1jthFTsjmL0poHuhFPsil31pIDzp4PtiFryrY3uf0ztiVvybjD0o3zzqIbzdDnwdj7rkGXwcznsi1/1oHjrkWfyq4rsi17ve0b0fkbxcjjyr5HyspT2mGz2oXryuZ/1nXPsilz22s7tiFnwdz713NHys5byro/ysJLskmnzrIzrlGz1n3fytZrzxrLsj2T228/11sj1nnXyqojqlm/23tPywKrzvaTzy7nzsZP0zr70ybX12Mvzu6L0oXvyuJ31m3H0pH/veUPyxK/th1n2mW7yqYjwwq3ytJj0wqzzr5D51cXzekLyv6f1zbzql3Hytpvz0MH10sLufkrxyLbyuqH++vjyq4n3q4f1xa/01MX86eD97eb++PXrmXT85Nrqmnbwi1z0tZj1mnD32szwvab60r/98evqmHP5yLH72sr73tD4wKYTbjv6zbnpm3j74dX0kGL+9fH5tZYybTn0iFb4uZv3sZBhimExeUucnnz4vKDhbjFhbDXEcDbBqIlhlnHCiFucbTMgdkZadkSVf1CbrpLjtJnqoH47gVXBwavxmXCAmXXfg1PXsJRLh17d0MCpdD15g1fQ4deoEmT0AAAASHRSTlMAEDC/gEDvv4BAz2CfQCDfEO9gj8/vnxBQr3DfgL8wIIC/j59gUF1wzyDvEK/fEM+f7yBQ34+vmHBoMIAwj3C/3yDPQFCvr/s8OcONAAAbuklE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"""
+
+
+# ---------------------------------------------------------------------------
+# External master files
+# ---------------------------------------------------------------------------
+# Keep these two files in the GitHub repository root. They can be replaced
+# whenever OLT/BBC/Manager/Area/Target information changes; no Python changes
+# are required.
+REPO_ROOT = Path(__file__).resolve().parent
+OLT_MASTER_FILE = REPO_ROOT / "OLT_BBC_MAP.xlsx"
+BBC_MASTER_FILE = REPO_ROOT / "BBC_Master.xlsx"
+
+def _pick_col(df, aliases, required=True):
+    lookup = {str(c).strip().upper().replace("_"," "): c for c in df.columns}
+    for alias in aliases:
+        key = alias.upper().replace("_"," ")
+        if key in lookup:
+            return lookup[key]
+    if required:
+        raise ValueError(f"Required column not found. Expected one of: {aliases}. Found: {list(df.columns)}")
+    return None
+
+def _read_master(path):
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Master file '{path.name}' is missing. Upload it to the GitHub repository "
+            f"beside app.py/report_processor.py and redeploy Streamlit."
+        )
+    return pd.read_excel(path, sheet_name=0, engine="calamine")
+
+def _load_masters():
+    olt = _read_master(OLT_MASTER_FILE)
+    bbc = _read_master(BBC_MASTER_FILE)
+
+    olt_ip_col = _pick_col(olt, ["OLT IP", "OLT_IP", "OLT", "IP"])
+    olt_bbc_col = _pick_col(olt, ["BBC Name", "BBC", "BBM Name", "Employee", "BBC_NAME"])
+    olt = olt[[olt_ip_col, olt_bbc_col]].rename(columns={olt_ip_col:"OLT IP", olt_bbc_col:"BBC Name"})
+    olt["OLT IP"] = olt["OLT IP"].fillna("").astype(str).str.strip()
+    olt["BBC Name"] = olt["BBC Name"].map(normalize_bbc_name)
+
+    bbc_name_col = _pick_col(bbc, ["BBC Name", "BBC", "BBM Name", "Employee"])
+    manager_col = _pick_col(bbc, ["DE / Manager", "DE/Manager", "Manager", "MT", "DE", "AGM/ Manager(MT)"])
+    area_col = _pick_col(bbc, ["Area / TIP", "Area/TIP", "Area", "TIP"])
+    target_col = _pick_col(bbc, ["Monthly Target", "BBC Target", "BBCTarget", "Target"])
+    display_col = _pick_col(bbc, ["Display Name", "Employee Display Name", "Name"], required=False)
+    manager_target_col = _pick_col(bbc, ["Manager Target", "DE Target", "MT Target"], required=False)
+    order_col = _pick_col(bbc, ["S.No", "SNO", "Order"], required=False)
+
+    bbc = bbc.rename(columns={
+        bbc_name_col:"BBC Name", manager_col:"Manager", area_col:"Area", target_col:"BBCTarget"
+    })
+    if display_col:
+        bbc = bbc.rename(columns={display_col:"Display Name"})
+    else:
+        bbc["Display Name"] = bbc["BBC Name"]
+    if manager_target_col:
+        bbc = bbc.rename(columns={manager_target_col:"ManagerTarget"})
+    else:
+        bbc["ManagerTarget"] = pd.to_numeric(bbc["BBCTarget"], errors="coerce").fillna(0)
+    if order_col:
+        bbc = bbc.rename(columns={order_col:"Order"})
+    else:
+        bbc["Order"] = range(1, len(bbc)+1)
+
+    bbc["BBC Name"] = bbc["BBC Name"].map(normalize_bbc_name)
+    bbc["Manager"] = bbc["Manager"].fillna("UNMAPPED").astype(str).str.strip()
+    bbc["Area"] = bbc["Area"].fillna("UNMAPPED").astype(str).str.strip()
+    bbc["BBCTarget"] = pd.to_numeric(bbc["BBCTarget"], errors="coerce").fillna(0).astype(int)
+    bbc["ManagerTarget"] = pd.to_numeric(bbc["ManagerTarget"], errors="coerce").fillna(0).astype(int)
+    bbc["Display Name"] = bbc["Display Name"].fillna(bbc["BBC Name"]).astype(str).str.strip()
+    bbc = bbc.drop_duplicates("BBC Name", keep="last").sort_values("Order")
+    olt_map = dict(zip(olt["OLT IP"], olt["BBC Name"]))
+    bbc_info = {
+        r["BBC Name"]: (r["Manager"], int(r["ManagerTarget"]), r["Area"], int(r["BBCTarget"]), r["Display Name"])
+        for _, r in bbc.iterrows()
+    }
+    bbc_order = bbc["BBC Name"].tolist()
+    return olt_map, bbc_info, bbc_order, olt, bbc
+
+def normalize_bbc_name(v):
+    return " ".join(str(v if pd.notna(v) else "").split())
+
+CONN_NPC = "NPC"
+
+CONN_RECON = "RECONNECTION"
+CONN_CLSNP = "DUE TO NON PAYMENT (CLSNP)"
+CONN_CLSVO = "VOLUNTAORY DISCONNECTION (CLSVO)"
+CONN_OTHER = "OTHER"
+
+
+def _parse_source_date(series):
+    # Handles Excel serials, datetime objects and strings such as 16-AUG-2026.
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return pd.to_datetime(series, errors="coerce").dt.normalize()
+    out = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    return out.dt.normalize()
+
+
+def _read_source(path):
+    # The source export has column headings on Excel row 3 => header=2.
+    df = pd.read_excel(path, sheet_name="Sheet0", header=2, engine="calamine")
+    df = df.dropna(how="all").copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+def _classify(df, olt_map):
+    required = ["BBC Name", "CLSR", "Ont Acquisition Type", "Disconnection reason",
+                "Completion_Date", "Maintenance Franchisee", "OLT IP", "Order Id"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    df = df.copy()
+    df["OLT IP"] = df["OLT IP"].fillna("").astype(str).str.strip()
+    df["Order Id"] = df["Order Id"].fillna("").astype(str).str.strip()
+    df["CLSR"] = df["CLSR"].fillna("").astype(str).str.strip().str.upper()
+    df["Maintenance Franchisee"] = df["Maintenance Franchisee"].fillna("").astype(str).str.strip()
+
+    # OLT IP -> canonical BBC mapping, with source BBC as fallback.
+    df["BBC Name"] = df["OLT IP"].map(olt_map).fillna(df["BBC Name"].map(normalize_bbc_name))
+    df["BBC Name"] = df["BBC Name"].map(normalize_bbc_name)
+
+    oid = df["Order Id"].str[:5].str.upper()
+    df["Connection Type"] = CONN_OTHER
+    df.loc[(df["CLSR"] == "ACTIVE") & (oid == "BFBNC"), "Connection Type"] = CONN_NPC
+    df.loc[(df["CLSR"] == "ACTIVE") & (oid != "BFBNC"), "Connection Type"] = CONN_RECON
+    df.loc[(df["CLSR"] == "CLSD") & (oid == "BFBDI"), "Connection Type"] = CONN_CLSNP
+    df.loc[(df["CLSR"] == "CLSV") & (oid == "BFBDI"), "Connection Type"] = CONN_CLSVO
+
+    df["DATE"] = _parse_source_date(df["Completion_Date"])
+    return df
+
+
+def _aggregate(df):
+    # Vectorized flags avoid row-by-row loops.
+    g = df.assign(
+        NPC=(df["Connection Type"] == CONN_NPC).astype(int),
+        RECON=(df["Connection Type"] == CONN_RECON).astype(int),
+        CLSVO=(df["Connection Type"] == CONN_CLSVO).astype(int),
+        CLSNP=(df["Connection Type"] == CONN_CLSNP).astype(int),
+    )
+    g["PROVISION"] = g["NPC"] + g["RECON"]
+    return g
+
+
+def _bbc_report(df, report_date, olt_map, bbc_info, bbc_order):
+    rows=[]
+    for bbc in bbc_order:
+        mgr, mgr_target, area, bbc_target, display_name = bbc_info[bbc]
+        x=df[df["BBC Name"]==bbc]
+        npc=int((x["Connection Type"]==CONN_NPC).sum())
+        recon=int((x["Connection Type"]==CONN_RECON).sum())
+        clsvo=int((x["Connection Type"]==CONN_CLSVO).sum())
+        clsnp=int((x["Connection Type"]==CONN_CLSNP).sum())
+        today=int(((x["Connection Type"].isin([CONN_NPC,CONN_RECON])) & (x["DATE"]==report_date)).sum())
+        cum=npc+recon; disc=clsvo+clsnp; net=cum-disc
+        olt_count=sum(1 for v in olt_map.values() if v==bbc)
+        rows.append({
+            "S.No":len(rows)+1, "AGM/ Manager(MT)":mgr, "BBM NAME":display_name,
+            "AREA":area, "Exclusive/Non Exclusive":"EXCLUSIVE" if len(rows)==0 else "",
+            "No. Of OLTEs Mapped":olt_count, "Monthly Target":bbc_target,
+            f"Daily Provision{report_date:%d-%m-%Y}":today,
+            "Cumulative Achievement":cum, "% of Achievement":(cum/bbc_target if bbc_target else 0),
+            "CLSVO":clsvo, "CLSNP":clsnp, "Disconnections":disc, "NET":net,
+            "NPC":npc, "RECONNECTIONS":recon
+        })
+    return pd.DataFrame(rows)
+
+def _style_table(ws, df, workbook, startrow=0, header_format=None):
+    # Convenience formatter for pandas/xlsxwriter output.
+    if df.empty: return
+    cols=list(df.columns)
+    for j,col in enumerate(cols):
+        width=min(max(12, max([len(str(col))]+[len(str(x)) for x in df[col].head(300).fillna("")])+2), 38)
+        ws.set_column(j,j,width)
+    if header_format:
+        for j,col in enumerate(cols): ws.write(startrow,j,col,header_format)
+
+
+def _write_xlsx(df, bbc_report, output_xlsx, report_date, stats, franchise_report, manager_report, olt_master, bbc_master):
+    out=Path(output_xlsx); out.parent.mkdir(parents=True,exist_ok=True)
+    with pd.ExcelWriter(out, engine="xlsxwriter", datetime_format="dd-mmm-yyyy", date_format="dd-mmm-yyyy") as writer:
+        wb=writer.book
+        navy=wb.add_format({"bold":True,"font_color":"white","bg_color":"#17365D","align":"center","valign":"vcenter"})
+        blue=wb.add_format({"bold":True,"font_color":"white","bg_color":"#1F4EBA","align":"center","valign":"vcenter"})
+        title=wb.add_format({"bold":True,"font_size":22,"font_color":"white","bg_color":"#17365D","align":"center","valign":"vcenter"})
+        sub=wb.add_format({"italic":True,"font_color":"#666666","align":"center"})
+        pct=wb.add_format({"num_format":"0.0%"})
+        num=wb.add_format({"num_format":"#,##0"})
+        green=wb.add_format({"bg_color":"#E2F0D9","font_color":"#006100","bold":True})
+        red=wb.add_format({"bg_color":"#FCE4D6","font_color":"#9C0006","bold":True})
+        wrap=wb.add_format({"text_wrap":True,"valign":"top"})
+
+        # Raw prepared data
+        data_out=df.copy()
+        data_out["DATE"]=pd.to_datetime(data_out["DATE"],errors="coerce")
+        data_out.to_excel(writer,sheet_name="Data",index=False,startrow=0)
+        ws=writer.sheets["Data"]; ws.freeze_panes(1,0)
+        ws.set_tab_color("#4472C4")
+        for j,c in enumerate(data_out.columns): ws.write(0,j,c,navy)
+        ws.set_column(0,len(data_out.columns)-1,14)
+        for c in ["BBC Name","Maintenance Franchisee","Connection Type"]:
+            if c in data_out.columns: ws.set_column(data_out.columns.get_loc(c),data_out.columns.get_loc(c),28)
+
+        # Executive dashboard - no drawing charts in this sheet; charts get dedicated sheets.
+        bbc_report.to_excel(writer,sheet_name="FTTHDashboard",index=False,startrow=7)
+        ws=writer.sheets["FTTHDashboard"]; ws.hide_gridlines(2); ws.freeze_panes(8,0)
+        ws.merge_range("A1:P2","FTTH WARANGAL OA DASHBOARD",title)
+        ws.merge_range("A3:P3",f"Daily provisions dashboard | As on {report_date:%d-%m-%Y}",sub)
+        for j,c in enumerate(bbc_report.columns): ws.write(7,j,c,blue)
+        ws.set_row(0,24); ws.set_row(1,24); ws.set_row(7,32)
+        ws.set_column("A:A",7); ws.set_column("B:B",20); ws.set_column("C:C",34); ws.set_column("D:D",15); ws.set_column("E:E",18)
+        ws.set_column("F:I",14); ws.set_column("J:J",14); ws.set_column("K:N",12)
+        ws.set_column("J:J",14,pct)
+        # Total OA row above the table, preserving app.py's expected row 8 structure.
+        total={"S.No":"Total OA","AGM/ Manager(MT)":"WGL","BBM NAME":"","AREA":"","Exclusive/Non Exclusive":"",
+               "No. Of OLTEs Mapped":int(bbc_report["No. Of OLTEs Mapped"].sum()),"Monthly Target":int(bbc_report["Monthly Target"].sum()),
+               f"Daily Provision{report_date:%d-%m-%Y}":int(bbc_report[f"Daily Provision{report_date:%d-%m-%Y}"].sum()),
+               "Cumulative Achievement":int(bbc_report["Cumulative Achievement"].sum()),"% of Achievement":(bbc_report["Cumulative Achievement"].sum()/bbc_report["Monthly Target"].sum() if bbc_report["Monthly Target"].sum() else 0),
+               "CLSVO":int(bbc_report["CLSVO"].sum()),"CLSNP":int(bbc_report["CLSNP"].sum()),"Disconnections":int(bbc_report["Disconnections"].sum()),
+               "NET":int(bbc_report["NET"].sum()),"NPC":int(bbc_report["NPC"].sum()),"RECONNECTIONS":int(bbc_report["RECONNECTIONS"].sum())}
+        for j,c in enumerate(bbc_report.columns): ws.write(8,j,total.get(c,""),navy if j in range(14) else None)
+        # Note: table begins at row 8 zero-based (Excel row 9), total at Excel row 9 would shift app parsing.
+        # Rewrite total to Excel row 8 (zero-based 7) and headers to Excel row 7 (zero-based 6) is handled below.
+        # We intentionally maintain the existing app contract: Excel row 8 = total, row 9+ = details.
+        ws.set_row(7,20)
+        # Move actual dataframe headers to row 7 and details to row 8? Pandas wrote headers at row 8.
+        # Rewrite a clean report manually from row 6 so app.py sees total at zero-based index 8.
+        # Clear the old area by overwriting the intended rows.
+        for j,c in enumerate(bbc_report.columns): ws.write(6,j,c,blue)
+        for j,c in enumerate(bbc_report.columns): ws.write(7,j,total.get(c,""),navy)
+        for i,(_,r) in enumerate(bbc_report.iterrows(),start=8):
+            for j,c in enumerate(bbc_report.columns):
+                val=r[c]
+                if pd.isna(val): val=""
+                fmt=pct if c=="% of Achievement" else None
+                ws.write(i,j,val,fmt)
+        ws.set_row(7,24); ws.autofilter(6,0,7+len(bbc_report),len(bbc_report.columns)-1)
+
+        manager_report.to_excel(writer,sheet_name="Manager_Report",index=False)
+        franchise_report.to_excel(writer,sheet_name="Franchisee_Report",index=False)
+        for sname,dd in [("Manager_Report",manager_report),("Franchisee_Report",franchise_report)]:
+            ws=writer.sheets[sname]; ws.freeze_panes(1,0)
+            for j,c in enumerate(dd.columns): ws.write(0,j,c,blue)
+            ws.set_column(0,len(dd.columns)-1,16)
+            if "Name" in dd.columns: ws.set_column(dd.columns.get_loc("Name"),dd.columns.get_loc("Name"),30)
+
+        # Native Excel tables provide robust dropdown filters without VBA.
+        for sname,dd,table_name in [("Data",data_out,"tbl_FTTH_Data"),("Manager_Report",manager_report,"tbl_Manager_Report"),("Franchisee_Report",franchise_report,"tbl_Franchisee_Report")]:
+            if len(dd): writer.sheets[sname].add_table(0,0,len(dd),len(dd.columns)-1,{"name":table_name,"style":"Table Style Medium 2","columns":[{"header":c} for c in dd.columns]})
+
+        # Master sheets: write the exact repository master files used by this run.
+        olt_master.to_excel(writer,sheet_name="OLT_BBC_Map",index=False)
+        bbc_master.to_excel(writer,sheet_name="BBC_Master",index=False)
+        for sname,dd in [("OLT_BBC_Map",olt_master),("BBC_Master",bbc_master)]:
+            ws=writer.sheets[sname]; ws.freeze_panes(1,0)
+            for j,c in enumerate(dd.columns): ws.write(0,j,c,blue)
+            ws.set_column(0,len(dd.columns)-1,24)
+
+        # Dedicated chart sheets prevent overlap entirely.
+        charts={}
+        # BBC performance
+        cr=wb.add_worksheet("Charts_BBC"); cr.hide_gridlines(2); cr.set_column("A:A",2); cr.set_column("B:Q",13)
+        cr.merge_range("B2:Q3","BBC / EMPLOYEE PERFORMANCE",title)
+        chart=wb.add_chart({"type":"bar"}); n=len(bbc_report)
+        chart.add_series({"name":"Cumulative","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,8,7+n,8],"data_labels":{"value":True}})
+        chart.set_title({"name":"Cumulative Achievement by BBC / Employee"}); chart.set_x_axis({"name":"Connections"}); chart.set_y_axis({"name":"BBC / Employee"}); chart.set_legend({"none":True}); chart.set_size({"width":1050,"height":620}); cr.insert_chart("B5",chart)
+        chart2=wb.add_chart({"type":"bar"}); chart2.add_series({"name":"NET","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,13,7+n,13],"data_labels":{"value":True}}); chart2.set_title({"name":"NET by BBC / Employee"}); chart2.set_x_axis({"name":"NET Connections"}); chart2.set_y_axis({"name":"BBC / Employee"}); chart2.set_legend({"none":True}); chart2.set_size({"width":1050,"height":620}); cr.insert_chart("B38",chart2)
+
+        cr2=wb.add_worksheet("Charts_Operations"); cr2.hide_gridlines(2); cr2.set_column("A:A",2); cr2.set_column("B:Q",13); cr2.merge_range("B2:Q3","OPERATIONS & TARGET ANALYSIS",title)
+        ch=wb.add_chart({"type":"column"}); ch.add_series({"name":"Target","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,6,7+n,6]}); ch.add_series({"name":"Achieved","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,8,7+n,8]}); ch.set_title({"name":"Monthly Target vs Cumulative Achievement"}); ch.set_y_axis({"name":"Connections"}); ch.set_size({"width":1050,"height":600}); cr2.insert_chart("B5",ch)
+        ch2=wb.add_chart({"type":"column","subtype":"stacked"}); ch2.add_series({"name":"CLSVO","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,10,7+n,10]}); ch2.add_series({"name":"CLSNP","categories":["FTTHDashboard",8,2,7+n,2],"values":["FTTHDashboard",8,11,7+n,11]}); ch2.set_title({"name":"Disconnections by BBC / Employee"}); ch2.set_y_axis({"name":"Connections"}); ch2.set_size({"width":1050,"height":600}); cr2.insert_chart("B36",ch2)
+
+        # Dashboard is a clean executive landing page with KPI cards and hyperlinks, no overlapping chart objects.
+        dash=wb.add_worksheet("Dashboard"); dash.hide_gridlines(2); dash.set_column("A:A",3); dash.set_column("B:Y",12)
+        dash.merge_range("B2:Y4","FTTH WARANGAL OA – EXECUTIVE DASHBOARD",title)
+        kpis=[("MONTHLY TARGET",stats["target"]),("CUMULATIVE",stats["cum"]),("NPC",stats["npc"]),("RECONNECTIONS",stats["reconnections"]),("DISCONNECTIONS",stats["disc"]),("ACHIEVEMENT",f'{stats["pct"]:.1f}%'),("NET",stats["net"])]
+        for i,(lab,val) in enumerate(kpis):
+            c=2+i*3; dash.merge_range(5,c,6,c+2,str(val),wb.add_format({"bold":True,"font_size":18,"align":"center","valign":"vcenter","bg_color":"#F2F4F8"})); dash.merge_range(7,c,7,c+2,lab,wb.add_format({"bold":True,"font_size":9,"align":"center","font_color":"#666666"}))
+        dash.write("B10","Use the dedicated chart sheets below. All BBC / employee rows are retained; no Top-N truncation is applied.",wrap)
+        dash.write_url("B12","internal:'Charts_BBC'!B5",string="Open BBC / Employee Charts")
+        dash.write_url("B14","internal:'Charts_Operations'!B5",string="Open Operations Charts")
+        dash.write_url("B16","internal:'Manager_Report'!A1",string="Open Manager / MT Report")
+        dash.write_url("B18","internal:'Franchisee_Report'!A1",string="Open Maintenance Franchisee Report")
+
+
+def run_report(input_file, output_xlsx, output_html):
+    src=Path(input_file)
+    olt_map, bbc_info, bbc_order, olt_master, bbc_master = _load_masters()
+    raw=_read_source(src)
+    df=_aggregate(_classify(raw, olt_map))
+    report_date=pd.Timestamp(dt.date.today()-dt.timedelta(days=1))
+    bbc=_bbc_report(df, report_date, olt_map, bbc_info, bbc_order)
+
+    unmapped_olts=sorted(set(df.loc[~df["OLT IP"].isin(olt_map),"OLT IP"]) - {""})
+    unmapped_names=sorted(set(df.loc[~df["BBC Name"].isin(bbc_info),"BBC Name"]) - {""})
+
+    bdf=df.copy()
+    bdf["Manager"]=bdf["BBC Name"].map({k:v[0] for k,v in bbc_info.items()}).fillna("UNMAPPED")
+    bdf["Area"]=bdf["BBC Name"].map({k:v[2] for k,v in bbc_info.items()}).fillna("UNMAPPED")
+
+    manager_rows=[]
+    for mgr,g in bdf.groupby("Manager",sort=False):
+        manager_rows.append({
+            "Manager":mgr,
+            "NPC":int((g["Connection Type"]==CONN_NPC).sum()),
+            "Reconnections":int((g["Connection Type"]==CONN_RECON).sum()),
+            "CLSVO":int((g["Connection Type"]==CONN_CLSVO).sum()),
+            "CLSNP":int((g["Connection Type"]==CONN_CLSNP).sum()),
+            "Cumulative":int(g["Connection Type"].isin([CONN_NPC,CONN_RECON]).sum()),
+            "NET":int(g["Connection Type"].isin([CONN_NPC,CONN_RECON]).sum()-g["Connection Type"].isin([CONN_CLSVO,CONN_CLSNP]).sum())
+        })
+    manager_report=pd.DataFrame(manager_rows)
+
+    franchise_rows=[]
+    for mf,g in df.groupby("Maintenance Franchisee",dropna=False,sort=False):
+        mf=str(mf) if pd.notna(mf) else "(Blank)"
+        franchise_rows.append({
+            "Maintenance Franchisee":mf,
+            "NPC":int((g["Connection Type"]==CONN_NPC).sum()),
+            "Reconnections":int((g["Connection Type"]==CONN_RECON).sum()),
+            "CLSVO":int((g["Connection Type"]==CONN_CLSVO).sum()),
+            "CLSNP":int((g["Connection Type"]==CONN_CLSNP).sum()),
+            "NET":int(g["Connection Type"].isin([CONN_NPC,CONN_RECON]).sum()-g["Connection Type"].isin([CONN_CLSVO,CONN_CLSNP]).sum()),
+            "Total Orders":len(g)
+        })
+    franchise_report=pd.DataFrame(franchise_rows).sort_values("NET",ascending=False) if franchise_rows else pd.DataFrame()
+
+    stats={
+        "target":int(bbc["Monthly Target"].sum()),
+        "cum":int(bbc["Cumulative Achievement"].sum()),
+        "today":int(bbc[f"Daily Provision{report_date:%d-%m-%Y}"].sum()),
+        "disc":int(bbc["Disconnections"].sum()),
+        "net":int(bbc["NET"].sum()),
+        "npc":int(bbc["NPC"].sum()),
+        "reconnections":int(bbc["RECONNECTIONS"].sum())
+    }
+    stats["pct"]=(stats["cum"]/stats["target"]*100) if stats["target"] else 0
+
+    _write_xlsx(df, bbc, output_xlsx, report_date, stats, franchise_report, manager_report, olt_master, bbc_master)
+
+    rows=bbc.copy()
+    table=rows.to_html(index=False,border=0,classes="data-table",escape=True)
+    kpi_items=[
+        ("Monthly Target",f'{stats["target"]:,}'),("Cumulative",f'{stats["cum"]:,}'),
+        ("NPC",f'{stats["npc"]:,}'),("Reconnections",f'{stats["reconnections"]:,}'),
+        ("Disconnections",f'{stats["disc"]:,}'),("NET",f'{stats["net"]:+,}')
+    ]
+    kpi_html="".join([f'<div class="kpi"><div class="v">{v}</div><div class="l">{lab}</div></div>' for lab,v in kpi_items])
+    html_doc=f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FTTH Warangal Dashboard</title>
+<style>body{{font-family:Segoe UI,Arial;background:#f3f6fa;margin:0;color:#1b1f24}}.hero{{background:#17365D;color:#fff;padding:28px 34px}}.hero h1{{margin:0}}.kpis{{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;padding:22px}}.kpi{{background:#fff;padding:18px;border-radius:10px;box-shadow:0 2px 8px #0001}}.v{{font-size:26px;font-weight:700;color:#1f4eba}}.l{{font-size:11px;color:#666}}.wrap{{padding:0 22px 30px;overflow:auto}}table{{border-collapse:collapse;width:100%;background:#fff}}th,td{{padding:8px;border:1px solid #ddd;text-align:center;white-space:nowrap}}th{{background:#1f4eba;color:#fff}}tr:nth-child(even){{background:#f7f9fc}}@media(max-width:900px){{.kpis{{grid-template-columns:repeat(2,1fr)}}}}</style></head>
+<body><div class="hero"><h1>FTTH WARANGAL OA DASHBOARD</h1><div>All BBC / employee records • generated {report_date:%d-%b-%Y}</div></div><div class="kpis">{kpi_html}</div><div class="wrap">{table}</div></body></html>"""
+    Path(output_html).write_text(html_doc,encoding="utf-8")
+    return Path(output_xlsx), Path(output_html), {
+        "rows_processed":len(df),"unmapped_olt_ips":unmapped_olts,
+        "unmapped_bbc_names":unmapped_names,
+        "connection_types":df["Connection Type"].value_counts().to_dict()
+    }
+
