@@ -783,8 +783,13 @@ function downloadCsv(){{
 </body>
 </html>"""
 
+    # Write the HTML file before returning its path.
+    # Streamlit reads html_path immediately after run_report() returns.
+    output_html_path = Path(output_html)
+    output_html_path.parent.mkdir(parents=True, exist_ok=True)
+    output_html_path.write_text(html_doc, encoding="utf-8")
 
-    return Path(output_xlsx), Path(output_html), {
+    return Path(output_xlsx), output_html_path, {
         "rows_processed":len(df),"unmapped_olt_ips":unmapped_olts,
         "unmapped_bbc_names":unmapped_names,
         "connection_types":df["Connection Type"].value_counts().to_dict()
