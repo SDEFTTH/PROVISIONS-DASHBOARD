@@ -644,13 +644,128 @@ def run_report(input_file, output_xlsx, output_html):
         for lab, value in kpi_items
     )
 
+
+    def _esc_svg(value):
+        return (html.escape(str(value))
+                .replace("'", "&#39;"))
+
+    def _nice_max(value, minimum=1):
+        value = float(value or 0)
+        if value <= 0:
+            return minimum
+        raw = value * 1.15
+        step = 1
+        if raw >= 10000:
+            step = 5000
+        elif raw >= 1000:
+            step = 500
+        elif raw >= 100:
+            step = 50
+        elif raw >= 10:
+            step = 5
+        return max(minimum, int((raw + step - 1) // step) * step)
+
+    def _fmt_num(value):
+        try:
+            return f"{float(value):,.0f}"
+        except Exception:
+            return "0"
+
+    chart_w, chart_h = 760, 320
+    plot_left, plot_right = 58, 730
+    plot_top, plot_bottom = 38, 255
+    plot_h = plot_bottom - plot_top
+
+    # Chart 1: Monthly Target vs NET (inline SVG; works offline and in Streamlit).
+    target_vals = pd.to_numeric(rows["Monthly Target"], errors="coerce").fillna(0).astype(float).tolist()
+    net_vals = pd.to_numeric(rows["NET"], errors="coerce").fillna(0).astype(float).tolist()
+    chart_labels = rows["BBM NAME"].fillna("").astype(str).tolist()
+    max_abs = max([abs(v) for v in target_vals + net_vals] + [1])
+    y_max = _nice_max(max_abs)
+    y_min = min(0, min(net_vals + [0]))
+    y_min = -max(y_max * 0.15, abs(y_min) * 1.15) if y_min < 0 else 0
+    y_range = y_max - y_min
+
+    def _y(v):
+        return plot_bottom - ((float(v) - y_min) / y_range) * plot_h
+
+    svg1 = [f'<svg viewBox="0 0 {chart_w} {chart_h}" class="chart-svg" role="img" aria-label="BBC Wise Monthly Target versus NET">']
+    svg1.append('<rect x="0" y="0" width="760" height="320" fill="#ffffff"/>')
+    svg1.append('<text x="380" y="22" text-anchor="middle" font-size="15" font-weight="700" fill="#222">BBC Wise: Monthly Target vs NET</text>')
+
+    for tick in range(5):
+        val = y_min + (y_max - y_min) * tick / 4
+        yy = _y(val)
+        svg1.append(f'<line x1="{plot_left}" y1="{yy:.1f}" x2="{plot_right}" y2="{yy:.1f}" stroke="#e5e7eb"/>')
+        svg1.append(f'<text x="50" y="{yy+4:.1f}" text-anchor="end" font-size="10" fill="#666">{_fmt_num(val)}</text>')
+
+    svg1.append(f'<line x1="{plot_left}" y1="{plot_top}" x2="{plot_left}" y2="{plot_bottom}" stroke="#888"/>')
+    svg1.append(f'<line x1="{plot_left}" y1="{_y(0):.1f}" x2="{plot_right}" y2="{_y(0):.1f}" stroke="#888"/>')
+
+    n = max(len(chart_labels), 1)
+    group_w = (plot_right - plot_left) / n
+    bar_w = max(4, min(22, group_w * 0.30))
+    for i, label in enumerate(chart_labels):
+        cx = plot_left + group_w * (i + 0.5)
+        vals = [(target_vals[i], "#1f4eba"), (net_vals[i], "#c80000")]
+        for j, (val, fill) in enumerate(vals):
+            x = cx + (j - 0.5) * bar_w
+            y0, y1 = _y(0), _y(val)
+            top = min(y0, y1)
+            height = max(1, abs(y1 - y0))
+            svg1.append(f'<rect x="{x:.1f}" y="{top:.1f}" width="{bar_w:.1f}" height="{height:.1f}" rx="2" fill="{fill}"/>')
+        if n <= 12:
+            short = label if len(label) <= 16 else label[:14] + "…"
+            svg1.append(f'<text x="{cx:.1f}" y="275" text-anchor="middle" font-size="10" fill="#444" transform="rotate(-25 {cx:.1f} 275)">{_esc_svg(short)}</text>')
+
+    svg1.append('<rect x="520" y="292" width="12" height="12" fill="#1f4eba"/><text x="538" y="302" font-size="11" fill="#444">Monthly Target</text>')
+    svg1.append('<rect x="640" y="292" width="12" height="12" fill="#c80000"/><text x="658" y="302" font-size="11" fill="#444">NET</text>')
+    svg1.append('</svg>')
+    chart1_svg = "".join(svg1)
+
+    # Chart 2: % Achievement as an inline SVG line chart.
+    pct_vals = pd.to_numeric(rows["% of Achievement"], errors="coerce").fillna(0).astype(float).mul(100).tolist()
+    pct_max = max([100] + pct_vals)
+    pct_ymax = max(100, ((pct_max * 1.15 + 9) // 10) * 10)
+    def _yp(v):
+        return plot_bottom - (float(v) / pct_ymax) * plot_h
+
+    svg2 = [f'<svg viewBox="0 0 {chart_w} {chart_h}" class="chart-svg" role="img" aria-label="BBC Wise percentage of achievement">']
+    svg2.append('<rect x="0" y="0" width="760" height="320" fill="#ffffff"/>')
+    svg2.append('<text x="380" y="22" text-anchor="middle" font-size="15" font-weight="700" fill="#222">BBC Wise: % of Achievement</text>')
+    for tick in range(6):
+        val = pct_ymax * tick / 5
+        yy = _yp(val)
+        svg2.append(f'<line x1="{plot_left}" y1="{yy:.1f}" x2="{plot_right}" y2="{yy:.1f}" stroke="#e5e7eb"/>')
+        svg2.append(f'<text x="50" y="{yy+4:.1f}" text-anchor="end" font-size="10" fill="#666">{val:.0f}%</text>')
+    svg2.append(f'<line x1="{plot_left}" y1="{plot_top}" x2="{plot_left}" y2="{plot_bottom}" stroke="#888"/>')
+    svg2.append(f'<line x1="{plot_left}" y1="{plot_bottom}" x2="{plot_right}" y2="{plot_bottom}" stroke="#888"/>')
+
+    if pct_vals:
+        points = []
+        for i, val in enumerate(pct_vals):
+            x = plot_left + ((plot_right - plot_left) * (i / max(len(pct_vals)-1, 1)))
+            y = _yp(val)
+            points.append((x, y))
+        if len(points) > 1:
+            point_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+            svg2.append(f'<polyline points="{point_str}" fill="none" stroke="#c80000" stroke-width="3"/>')
+        for i, (x, y) in enumerate(points):
+            val = pct_vals[i]
+            svg2.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" fill="#c80000"/>')
+            if len(points) <= 12:
+                svg2.append(f'<text x="{x:.1f}" y="{max(34, y-8):.1f}" text-anchor="middle" font-size="10" fill="#333">{val:.1f}%</text>')
+                short = chart_labels[i] if len(chart_labels[i]) <= 16 else chart_labels[i][:14] + "…"
+                svg2.append(f'<text x="{x:.1f}" y="275" text-anchor="middle" font-size="10" fill="#444" transform="rotate(-25 {x:.1f} 275)">{_esc_svg(short)}</text>')
+    svg2.append('</svg>')
+    chart2_svg = "".join(svg2)
+
     html_doc = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WARANGAL OA FTTH Dashboard</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 body{{font-family:Segoe UI,Arial,sans-serif;background:#f2f4f8;margin:0;color:#222;}}
 .banner{{background:linear-gradient(90deg,#373c6f,#1f4eba);color:#fff;padding:22px 30px;
@@ -679,8 +794,8 @@ border-radius:6px;cursor:pointer;font-size:14px;}}
 button.dl:hover{{background:#173a8f;}}
 .charts{{display:flex;gap:20px;flex-wrap:wrap;margin-top:24px;}}
 .chartbox{{background:#fff;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.08);
-padding:16px;flex:1;min-width:420px;}}
-.chartbox canvas{{max-height:320px;}}
+padding:16px;flex:1;min-width:420px;overflow:hidden;}}
+.chart-svg{{display:block;width:100%;height:auto;min-height:300px;}}
 @media(max-width:900px){{
 .kpis{{display:grid;grid-template-columns:repeat(2,1fr);}}
 .kpi{{min-width:0;}}
@@ -721,58 +836,17 @@ padding:16px;flex:1;min-width:420px;}}
   <button class="dl" onclick="downloadCsv()">Download table as CSV</button>
 
   <div class="charts">
-    <div class="chartbox"><canvas id="targetNetChart" height="260"></canvas></div>
-    <div class="chartbox"><canvas id="pctChart" height="260"></canvas></div>
+    <div class="chartbox">{chart1_svg}</div>
+    <div class="chartbox">{chart2_svg}</div>
   </div>
 </div>
 
 <script>
-const labels=[{labels_js}];
-const targets=[{target_js}];
-const nets=[{net_js}];
-const pcts=[{pct_js}];
-
-new Chart(document.getElementById('targetNetChart'), {{
-  type:'bar',
-  data:{{
-    labels:labels,
-    datasets:[
-      {{label:'Monthly Target',data:targets,backgroundColor:'#1f4eba'}},
-      {{label:'NET',data:nets,backgroundColor:'#c80000'}}
-    ]
-  }},
-  options:{{
-    responsive:true,
-    plugins:{{title:{{display:true,text:'BBC Wise: Monthly Target vs NET'}}}},
-    scales:{{y:{{beginAtZero:true}}}}
-  }}
-}});
-
-new Chart(document.getElementById('pctChart'), {{
-  type:'line',
-  data:{{
-    labels:labels,
-    datasets:[{{
-      label:'% of Achievement',
-      data:pcts,
-      borderColor:'#c80000',
-      backgroundColor:'rgba(200,0,0,.15)',
-      fill:true,
-      tension:.3
-    }}]
-  }},
-  options:{{
-    responsive:true,
-    plugins:{{title:{{display:true,text:'BBC Wise: % of Achievement'}}}},
-    scales:{{y:{{beginAtZero:true,ticks:{{callback:(v)=>v+'%'}}}}}}
-  }}
-}});
-
 function downloadCsv(){{
   const rows=[...document.querySelectorAll('#dashboardTable tr')].map(r=>
     [...r.children].map(c=>'"'+c.innerText.replace(/"/g,'""')+'"').join(',')
   );
-  const blob=new Blob([rows.join('\n')],{{type:'text/csv;charset=utf-8;'}});
+  const blob=new Blob([rows.join('\\n')],{{type:'text/csv;charset=utf-8;'}});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download='FTTH_Warangal_Dashboard.csv';
