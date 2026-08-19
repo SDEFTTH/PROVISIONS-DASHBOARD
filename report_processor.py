@@ -4,6 +4,7 @@ from io import BytesIO
 import base64
 import html
 import pandas as pd
+import openpyxl
 
 # Pandas is used for all source reading, transformation, aggregation and report data.
 # XlsxWriter is used only by pandas ExcelWriter to create the final XLSX file.
