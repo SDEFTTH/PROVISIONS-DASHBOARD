@@ -189,7 +189,7 @@ def _style_table(ws, df, workbook, startrow=0, header_format=None, widths=None):
             width = widths[col]
         else:
             sample = df[col].head(300).fillna("").astype(str)
-            width = min(max(10, max([len(str(col))] + [len(x) for x in sample]) + 2), 34)
+            width = min(max(10, max([len(str(col))] + [len(str(x)) for x in sample]) + 2), 34)
         ws.set_column(j, j, width)
     if header_format:
         for j, col in enumerate(cols):
